@@ -1,21 +1,29 @@
-from services.ingestion import ingest
-from services.chat import RagService
+from contextlib import asynccontextmanager
+from typing import Annotated
 
-def main():
-    rag_service = RagService()
+from fastapi import FastAPI, Request
+from pydantic import BaseModel, StringConstraints
 
-    try:
-        query = input("You: ").strip()
-        result = rag_service.ask(query)
-        print(f"AI: {result.answer}")
+from app.services.chat import RagService, Answer
 
-        print("\nSources:")
-        for source in result.sources:
-            print(source)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.rag = RagService()
+    yield
+    app.state.rag.close()
 
-    finally:
-        rag_service.close()
+app = FastAPI(title="Clause AI APIs", lifespan=lifespan)
 
+class ASKQuestion(BaseModel):
+    question: Annotated[
+      str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
+    ]
 
-if __name__ == "__main__":
-    main()
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+@app.post("/ask", response_model=Answer)
+def ask_query(body: ASKQuestion, req: Request):
+    return req.app.state.rag.ask(body.question)
+
